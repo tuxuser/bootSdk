@@ -1,11 +1,54 @@
 cmake_minimum_required(VERSION 3.13)
 project(bootSdk)
 
+macro(set_asm_props src)
+	set_property(SOURCE "${src}" PROPERTY LANGUAGE C)
+	set_property(SOURCE "${src}" PROPERTY COMPILE_DEFINITIONS __ASSEMBLY__)
+endmacro()
+
+function(get_last_ext fileName outVar)
+	get_filename_component(ext "${fileName}" EXT)
+	string(REGEX MATCH  "\.([a-zA-Z0-9]+)$" lastExt "${ext}")
+	set(${outVar} "${lastExt}" PARENT_SCOPE)
+endfunction()
+
+function(get_name_wle fileName outVar)
+	string(REGEX REPLACE "\.([a-zA-Z0-9]+)$" "" nameWle "${fileName}") 
+	set(${outVar} "${nameWle}" PARENT_SCOPE)
+endfunction()
 
 function(add_binary)
-	cmake_parse_arguments(BIN "" "TARGET;LDSCRIPT;LOADADDR;ENTRYPOINT" "SOURCES" ${ARGN})
+	cmake_parse_arguments(BIN "" "TARGET;LDSCRIPT;LOADADDR;ENTRYPOINT" "SOURCES;EXTRA_CFLAGS;EXTRA_LDFLAGS" ${ARGN})
 	
 	get_filename_component(BIN_LDSCRIPT "${BIN_LDSCRIPT}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+
+	get_last_ext("${BIN_LDSCRIPT}" ldsExt)
+	if(ldsExt STREQUAL ".m4")
+		get_filename_component(ldsName "${BIN_LDSCRIPT}" NAME)
+		get_name_wle("${ldsName}" ldsBaseName)
+
+		# construct target name
+		file(RELATIVE_PATH ldsRel "${CMAKE_CURRENT_SOURCE_DIR}" "${BIN_LDSCRIPT}")
+		get_filename_component(ldsDir "${BIN_LDSCRIPT}" DIRECTORY)
+		string (REPLACE "/" "-" ldsTargetName "${ldsRel}")
+		set(ldsTargetName "${ldsRel}")
+		
+		set(ldsOut "${CMAKE_CURRENT_BINARY_DIR}/${ldsBaseName}")		
+		# command to preprocess .lds
+		add_custom_command(
+			OUTPUT "${ldsOut}"
+			COMMAND sh -c \"m4 -D LOADADDR=${BIN_LOADADDR} -P "${BIN_LDSCRIPT}" > ${ldsOut}\"
+			DEPENDS "${BIN_LDSCRIPT}"
+		)
+		# target to invoke the command
+		add_custom_target(${ldsTargetName} DEPENDS ${ldsOut})
+
+		# replace ldscript with preprocessed version
+		message(STATUS ${ldsOut})
+		
+		set(BIN_LDSCRIPT "${ldsOut}")
+		set(LDSCRIPT_TARGET "${ldsTargetName}")
+	endif()
 
 	# prepend directory basename to target
 	get_filename_component(dirname "${CMAKE_CURRENT_LIST_DIR}" NAME)
@@ -21,11 +64,13 @@ function(add_binary)
 		
 		get_filename_component(ext "${src}" EXT)
 		
-		# LAST_EXT
-		string(REGEX MATCH  "\.([a-zA-Z0-9]+)$" lastExt "${ext}")
+		get_last_ext("${ext}" lastExt)
 
 		# Skip non-m4 files
 		if(NOT lastExt STREQUAL ".m4")
+			if(lastExt STREQUAL ".S")
+				set_asm_props("${src}")
+			endif()
 			list(APPEND sources "${src}")
 			continue()
 		endif()
@@ -34,8 +79,7 @@ function(add_binary)
 		file(RELATIVE_PATH relPath "${CMAKE_CURRENT_SOURCE_DIR}" "${src}")
 
 		get_filename_component(relDir "${relPath}" DIRECTORY)
-		# NAME_WLE
-		string(REGEX REPLACE "\.([a-zA-Z0-9]+)$" "" output "${relPath}") 
+		get_name_wle("${relPath}" output)
 
 		set(output "${CMAKE_CURRENT_BINARY_DIR}/${output}")
 		if(relDir)
@@ -54,8 +98,7 @@ function(add_binary)
 		# .S files must be passed to gcc just like C files
 		get_filename_component(output_ext "${output}" EXT)
 		if(output_ext STREQUAL ".S")
-			set_property(SOURCE "${output}" PROPERTY LANGUAGE C)
-			set_property(SOURCE "${output}" PROPERTY COMPILE_DEFINITIONS __ASSEMBLY__)
+			set_asm_props("${output}")
 		endif()
 
 		get_filename_component(src_name "${src}" NAME)
@@ -74,16 +117,30 @@ function(add_binary)
 	message(STATUS "${BIN_TARGET} ${sources}")
 
 	set(cflags -fno-exceptions -nostartfiles -nostdlib -ffreestanding -Os -no-pie -fno-plt -s -Wl,--build-id=none)
-	#set(cflags -fno-exceptions -nostartfiles -nostdlib -ffreestanding -Os -s -Wl,--build-id=none)
+	#set(cflags -fno-exceptions -nostartfiles -nostdlib -ffreestanding -fPIC -O0 -s -Wl,--build-id=none)
 	set(ldflags ${cflags} -T"${BIN_LDSCRIPT}")
 	
 	string (REPLACE ";" " " cflags_str "${cflags}")
 	string (REPLACE ";" " " ldflags_str "${ldflags}")
 	
+	if(BIN_EXTRA_CFLAGS)
+		string (REPLACE ";" " " extra_cflags_str "${BIN_EXTRA_CFLAGS}")
+		set(cflags_str "${cflags_str} ${extra_cflags_str}")
+	endif()
+	if(BIN_EXTRA_LDFLAGS)
+		string (REPLACE ";" " " extra_ldflags_str "${BIN_EXTRA_LDFLAGS}")
+		set(ldflags_str "${ldflags_str} ${extra_ldflags_str}")
+	endif()
+
 	set_target_properties(${BIN_TARGET} PROPERTIES COMPILE_FLAGS "${cflags_str}")
 	set_target_properties(${BIN_TARGET} PROPERTIES LINK_FLAGS "${ldflags_str}")
 	set_target_properties(${BIN_TARGET} PROPERTIES LINK_DEPENDS ${BIN_LDSCRIPT})
 	target_include_directories(${BIN_TARGET} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+
+	# if the user specified a .m4 based lds, add a dependency to its target
+	if(LDSCRIPT_TARGET)
+		add_dependencies(${BIN_TARGET} ${LDSCRIPT_TARGET})
+	endif()
 
 	# objcopy target: creates .bin file
 	get_filename_component(outputBin "${BIN_TARGET}.bin" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
@@ -116,4 +173,5 @@ function(add_binary)
 endfunction()
 
 add_subdirectory(lxboot)
-add_subdirectory(uboot-mstar)
+#add_subdirectory(uboot-mstar)
+add_subdirectory(cfe)
