@@ -14,6 +14,10 @@ void (*cmd_addcmd)(
     char *arg2Help
 );
 
+int (*decompressLZMA)(unsigned char *in, unsigned insize, unsigned char *out, unsigned outsize);
+void (*cfe_go)(cfe_loadargs_t *la);
+void (*memset)(void * ptr, int value, long num);
+
 unsigned long (*strtoul)(char *str);
 int (*tftpLoad)(char *fileName, unsigned long loadAddr);
 
@@ -21,6 +25,10 @@ int (*runProgram)(
     const char *srcType,
     const char *srcParam,
     int unk3,
+    const char *path
+);
+
+int (*autoRun)(
     const char *path
 );
 
@@ -56,7 +64,12 @@ void cfe_init_funcs()
     strtoul = (void *)0xf38b70;
     tftpLoad = (void *)0x00F1D8F0;
     runProgram = (void *)0xF1E1F4;
+    autoRun = (void *)0xF1F7D8;
     printString = *(void **)0xF6D714;
+    decompressLZMA = (void *)0xF462DC;
+    memset = (void *)0xF3889C;
+    cfe_go = (void *)0xF1E168;
+
 };
 
 int ui_tftpget(void *argv){
@@ -73,5 +86,75 @@ int ui_tftpget(void *argv){
 
 int ui_goex(void *argv){
     char *path = cmd_getarg(argv, 0);
-    return runProgram("tftp", "eth0", 3, path);
+    return runProgram("tftp", "eth0", 0x3, path);
 }
+
+int ui_autorun(void *argv){
+    char *path = cmd_getarg(argv, 0);
+    return autoRun(path);
+}
+
+int ui_bootc(void *argv){
+    char *address = cmd_getarg(argv, 0);
+    if (!address){
+        printf("Invalid Arguments\n");
+        printf("Usage: cboot <address>\n");
+        return -1;
+    }
+
+    unsigned long addr = strtoul(address);
+    return bootCompressedImage((uint32_t *)addr, 1);
+}
+
+// Compressed image head format in Big Endian:
+// 1) Text Start address:    4 bytes
+// 2) Program Entry point:   4 bytes
+// 3) Compress image Length: 4 bytes
+// 4) Compress data starts:  compressed data
+int bootCompressedImage(uint32_t *puiCmpImage, int retry)
+{
+    unsigned char *pucSrc;
+    unsigned char *pucDst;
+    unsigned char *pucEntry;
+    unsigned int dataLen;
+    unsigned int uncomplen = 0;
+    char          brcmMagic[] = {'B','R','C','M'};
+    int ret = 0;
+    cfe_loadargs_t la;
+
+    memset((unsigned char *) &la, 0x00, sizeof(la));
+
+    /* Boot compressed image that was downloaded to RAM. */
+    pucDst = (unsigned char *) ((uintptr_t)*puiCmpImage);
+    pucEntry = (unsigned char *)((uintptr_t)*(puiCmpImage + 1));
+    dataLen = (unsigned int) *(puiCmpImage + 2);
+    //new image format contains broadcom signature and uncompressed length.
+    if ( (*(puiCmpImage + 3)) == (*(uint32_t*)brcmMagic))
+    {
+        uncomplen = (unsigned int) *(puiCmpImage + 4);
+        pucSrc = (unsigned char *) (puiCmpImage + 5);
+    }
+    else
+    {
+    pucSrc = (unsigned char*) (puiCmpImage + 3);
+    }
+
+    printf("Code Address: 0x%08X, Entry Address: 0x%08x\n",
+        (uintptr_t) pucDst, (uintptr_t)pucEntry);
+
+    ret = decompressLZMA(pucSrc, dataLen, pucDst, 23*1024*1024);
+    
+    if (ret == 0) 
+    {
+        printf("Decompression %s image OK!\n",uncomplen ? "LZ4":"LZMA");
+        la.la_entrypt = (long) pucEntry;
+        la.la_flags = LA_DEFAULT_FLAGS;
+        printf("Entry at 0x%p\n",la.la_entrypt);
+        cfe_go(&la);  // never return...
+    }
+    else
+        printf("Failed on decompression.  Corrupted image?\n");
+
+    return ret;
+}
+

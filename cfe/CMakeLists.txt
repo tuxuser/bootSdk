@@ -1,8 +1,8 @@
 add_binary(
 	TARGET bootstrap
 	LDSCRIPT cfe.lds.m4
-	LOADADDR 0x500
-	ENTRYPOINT 0x500
+	LOADADDR 0x4000000
+	ENTRYPOINT 0x4000000
 	SOURCES
 		entry.S
 		cfe.c
@@ -15,8 +15,8 @@ add_binary(
 add_binary(
 	TARGET stage2
 	LDSCRIPT cfe_stage2.lds.m4
-	LOADADDR 0x600
-	ENTRYPOINT 0x600
+	LOADADDR 0x4010000
+	ENTRYPOINT 0x4010000
 	SOURCES
 		entry.S
 		cfe.c
@@ -27,15 +27,15 @@ add_binary(
 
 add_custom_target(deploy
 	COMMAND echo [+] Deploying cfe_boostrap.bin
-	COMMAND php ${CMAKE_CURRENT_LIST_DIR}/deploy.php ${CMAKE_CURRENT_BINARY_DIR}/cfe_bootstrap.bin 0x500
+	COMMAND php ${CMAKE_CURRENT_LIST_DIR}/deploy.php ${CMAKE_CURRENT_BINARY_DIR}/cfe_bootstrap.bin 0x4000000
 	COMMAND echo [+] Executing cfe_boostrap.bin...
-	COMMAND echo go 0x500 > /dev/ttyUSB0
+	COMMAND echo go 0x4000000 > /dev/ttyUSB0
 	COMMAND echo [+] Copying cfe_stage2.bin to TFTP directory...
 	COMMAND cp ${CMAKE_CURRENT_BINARY_DIR}/cfe_stage2.bin /srv/tftp/cfe_stage2.bin
 	COMMAND echo [+] Executing tftpget cfe_stage2.bin on target...
-	COMMAND echo tftpget 192.168.1.100:cfe_stage2.bin 0x600 > /dev/ttyUSB0
+	COMMAND echo tftpget 192.168.1.100:cfe_stage2.bin 0x4010000 > /dev/ttyUSB0
 	COMMAND echo [+] Executing cfe_stage2.bin...
-	COMMAND echo go 0x600 > /dev/ttyUSB0
+	COMMAND echo go 0x4010000 > /dev/ttyUSB0
 	DEPENDS cfe_bootstrap.bin cfe_stage2.bin
 )
 

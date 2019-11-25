@@ -1,3 +1,5 @@
+#include "cfe.h"
+
 // CFE definitions
 extern void *defaultHelp;
 extern int (*console_status)();
@@ -13,6 +15,10 @@ extern void (*cmd_addcmd)(
     char *arg2Help
 );
 
+extern int decompressLZMA(unsigned char *in, unsigned insize, unsigned char *out, unsigned outsize);
+extern void cfe_go(cfe_loadargs_t *la);
+extern void memset (void * ptr, int value, long num);
+
 extern unsigned long (*strtoul)(char *str);
 extern int (*tftpLoad)(char *fileName, unsigned long loadAddr);
 
@@ -20,6 +26,10 @@ extern int (*runProgram)(
     const char *srcType,
     const char *srcParam,
     int unk3,
+    const char *path
+);
+
+extern int (*autoRun)(
     const char *path
 );
 
